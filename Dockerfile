@@ -240,6 +240,20 @@ RUN cat <<EOF > /root/.vnc/tigervnc.conf
 \$AlwaysShared="no";
 EOF
 
+# "TigerVNC includes libvnc.so, which can be seamlessly loaded during X initialization for enhanced performance. To utilize this feature, create the following file and then restart X:
+# https://wiki.archlinux.org/title/TigerVNC
+RUN cat <<EOF > /etc/X11/xorg.conf.d/10-vnc.conf
+Section "Module"
+Load "vnc"
+EndSection
+
+Section "Screen"
+Identifier "Screen0"
+Option "UserPasswdVerifier" "VncAuth"
+Option "PasswordFile" "/root/.vnc/passwd"
+EndSection
+EOF
+
 # todo: gen, xfer x509 certs
 # /etc/tigervnc/vncserver-config-defaults
 # $SecurityTypes a comma separated list of security types the TigerVNC
@@ -279,9 +293,16 @@ ENV LC_CTYPE=en_US.utf8
 RUN mkdir -p /srv/
 RUN updatedb
 
-# start x11 vncserver
-RUN tigervncserver &
+# start vncerver with either tigervncserver or vncserver
+# $ md5sum $(which tigervncserver)
+# d105957af8cd8ff50e760340b6c890dd  /usr/bin/tigervncserver
+# $ md5sum $(which vncserver)
+# d105957af8cd8ff50e760340b6c890dd  /usr/bin/vncserver
+
 WORKDIR /root/
+RUN tigervncserver &
+
+# todo: set xfce launchers https://forum.xfce.org/viewtopic.php?id=11713
 
 ENTRYPOINT ["/usr/bin/env"]
 CMD ["tmux"]
