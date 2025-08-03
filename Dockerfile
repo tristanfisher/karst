@@ -1,0 +1,279 @@
+FROM debian:stable AS base
+
+# -- #
+# This is a base container setup for a linux environment.
+# This is not intended to be lightweight or "efficient".
+
+# --- #
+# base system config
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt update && apt install -y \
+    apt-transport-https \
+    apt-utils \
+    cmake \
+    curl \
+    file \
+    flatpak \
+    git \
+    gpg \
+    less \
+    locales \
+    locate \
+    make \
+    man \
+    net-tools \
+    strace \
+    tcpdump \
+    tmux \
+    vim
+
+RUN apt install -y gcc autoconf gdb
+
+FROM base AS gui
+
+# tigervnc https://github.com/TigerVNC/tigervnc
+# -> tightvnc has an 8 char password limit (DES) and doesn't seem very actively maintained
+# -> libvnc is very cool, but this workstation is meant to just get things done, not specific to writing VNC functionality
+# dbus as a message bus for IPC
+RUN apt install -y tigervnc-common tigervnc-standalone-server tigervnc-tools tigervnc-scraping-server tigervnc-xorg-extension
+RUN apt install -y xterm
+RUN apt install -y xinit
+RUN apt install -y xfce4
+RUN apt install -y xfce4-session
+RUN apt install -y x11-utils
+RUN apt install -y dbus-x11
+RUN mkdir -p /root/tool_downloads/
+
+# RDP client
+RUN apt install -y remmina
+
+
+## languages
+# python3: should already be available
+# go: via https://go.dev/dl/
+FROM gui AS languages
+
+RUN apt install -y g++
+
+# check CPU arch as there's an expectation of ARM/Apple silicon:
+# - uname -m
+# - arch
+# lscpu is also interesting to show more features
+
+# golang
+# add a script for getting the filename for go as it isn't
+# simple to derive from common shell scripts AFAIK
+#   go1.24.5.linux-arm64.tar.gz: uname -m
+#   go1.24.5.linux-amd64.tar.gz -- uname -m => x86_64
+#
+# https://go.dev/dl/go1.24.5.linux-arm64.tar.gz
+RUN cat <<EOF > /root/go_download_filename
+#!/usr/bin/env python3
+from platform import system, machine
+version="1.24.5"
+os_platform=system().lower()
+# arm64 -> mac os with apple silicon;
+# aarch64 -> guest on mac os with apple silicon
+# amd64 ->  linux on x86 64
+arch_golang={"arm64": "arm64","x86_64": "amd64", "aarch64": "arm64"}[machine()]
+suffix="tar.gz"
+go_file_name = f"go{version}.{os_platform}-{arch_golang}.{suffix}"
+print(go_file_name)
+EOF
+
+RUN chmod u+x /root/go_download_filename
+RUN curl -fsSLo /root/tool_downloads/$(/root/go_download_filename) "https://go.dev/dl/$(/root/go_download_filename)"
+RUN tar -xf /root/tool_downloads/$(/root/go_download_filename)
+RUN mv /root/tool_downloads/go /usr/local/go
+
+# rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# java installed in sre_tools layer
+
+
+FROM languages AS data_fetchers
+
+## web browser
+# brave
+RUN curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+RUN curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
+RUN apt update
+RUN apt install -y brave-browser
+
+
+## byte analysis / software reverse engineering
+FROM data_fetchers AS sre_tools
+
+RUN apt install -y hexedit
+
+# radare2
+# wget is used by the radare2 install script
+RUN apt install -y wget
+RUN git clone --depth 1 https://github.com/radareorg/radare2
+RUN radare2/sys/install.sh
+
+
+# iaito
+RUN flatpak remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo \
+RUN flatpak install flathub org.radare.iaito -y
+
+# flatpak run org.radare.iaito to run
+
+# ghidra
+# https://github.com/NationalSecurityAgency/ghidra
+# alternatively: https://github.com/blacktop/docker-ghidra
+#RUN apt install openjdk-17-jre-headless
+RUN curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor > /etc/apt/trusted.gpg.d/adoptium.gpg
+RUN echo "deb https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" > /etc/apt/sources.list.d/adoptium.list
+RUN apt update
+RUN apt install -y temurin-17-jdk
+
+# python 3 also required, with the OS version probably fine
+
+
+## ftp
+# graphical
+RUN apt install -y filezilla
+# command line
+RUN apt install -y vsftpd
+
+
+FROM data_fetchers AS sec_research
+
+RUN git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb
+RUN ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit
+
+RUN curl -fsSL https://apt.metasploit.com/metasploit-framework.gpg.key | gpg --dearmor > /usr/share/keyrings/metasploit.gpg
+# cat /etc/os-release | grep VERSION_CODENAME | awk 'BEGIN {FS = "=" } ; { print $2 } (or awk -F= '/^VERSION_CODENAME/{print$2}')
+# is more exact, but buster works.
+RUN echo "deb [signed-by=/usr/share/keyrings/metasploit.gpg] https://apt.metasploit.com/ buster main" | tee /etc/apt/sources.list.d/metasploit.list
+
+
+FROM sec_research AS user_environment
+
+# we don't care these default values are in the layer, we just want to
+# conceal them from anything else running in a process that could get access to env vars
+ENV vnc_password_arg_full='lanparty!'
+ENV vnc_password_arg_view='linuxtx!'
+
+# to add user with no finger/identifying info, no password login allowed:
+# RUN adduser --disabled-password --gecos "" whatever
+
+RUN <<EOF
+mkdir -p /root/.vnc/
+# .Xauthority gets populated on startup
+touch /root/.Xauthority
+EOF
+
+# users get their own ports for vnc sessions
+RUN echo ":1=root" >> /etc/tigervnc/vncserver.users
+
+# set password either by vncpasswd or tigervncpasswd
+# md5sum `which vncpasswd`; md5sum `which tigervncpasswd`
+# 0ca168d6252f449100bc231da09165ed  /usr/bin/vncpasswd
+# 0ca168d6252f449100bc231da09165ed  /usr/bin/tigervncpasswd
+#
+# set a default or take an arg to our VNC server to prevent an interactive prompt
+# to set a full access and a view only -- echo -e "whateverFullAccess\nwhateverViewOnly"
+# -e to interpret backslashes / special chars
+
+# this construction is supposed to work, but is resulting in any password allowing access in read-only
+# RUN su root -c 'echo -e "$vnc_password_arg_view\n$vnc_password_arg_full" | vncpasswd -f > $HOME/.vnc/passwd'
+RUN su root -c 'echo -e "$vnc_password_arg_full" | vncpasswd -f > $HOME/.vnc/passwd'
+RUN chmod 0600 $HOME/.vnc/passwd
+
+ENV vnc_password_arg_full=''
+ENV vnc_password_arg_view=''
+
+# write our desired configs for our users
+#
+# config locations found via: strace -e trace=file tigervncserver
+#   newfstatat(AT_FDCWD, "/etc/tigervnc/vncserver-config-defaults", {st_mode=S_IFREG|0644, st_size=10368, ...}, 0) = 0
+#   newfstatat(AT_FDCWD, "/etc/tigervnc/vncserver-config-defaults", {st_mode=S_IFREG|0644, st_size=10368, ...}, 0) = 0
+#   openat(AT_FDCWD, "/etc/tigervnc/vncserver-config-defaults", O_RDONLY|O_CLOEXEC) = 3
+#   newfstatat(AT_FDCWD, "/root/.vnc", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+#   newfstatat(AT_FDCWD, "/root/.vnc/tigervnc.conf", 0xaaaadf41f4a8, 0) = -1 ENOENT (No such file or directory)
+#   newfstatat(AT_FDCWD, "/root/.vnc/vnc.conf", 0xaaaadf41f4a8, 0) = -1 ENOENT (No such file or directory)
+#   newfstatat(AT_FDCWD, "/root/.vnc/config", 0xaaaadf41f4a8, 0) = -1 ENOENT (No such file or directory)
+#   newfstatat(AT_FDCWD, "/root/.vnc/Xtigervnc-session", 0xaaaadf41f4a8, 0) = -1 ENOENT (No such file or directory)
+#   newfstatat(AT_FDCWD, "/root/.vnc/Xvnc-session", 0xaaaadf41f4a8, 0) = -1 ENOENT (No such file or directory)
+#   newfstatat(AT_FDCWD, "/root/.vnc/xstartup", 0xaaaadf41f4a8, 0) = -1 ENOENT (No such file or directory)
+#   newfstatat(AT_FDCWD, "/etc/tigervnc/vncserver-config-mandatory", {st_mode=S_IFREG|0644, st_size=2189, ...}, 0) = 0
+#   newfstatat(AT_FDCWD, "/etc/tigervnc/vncserver-config-mandatory", {st_mode=S_IFREG|0644, st_size=2189, ...}, 0) = 0
+#   openat(AT_FDCWD, "/etc/tigervnc/vncserver-config-mandatory", O_RDONLY|O_CLOEXEC) = 3
+
+# requires being a systemd service
+# /usr/lib/systemd/system/tigervncserver\@.service
+# https://github.com/TigerVNC/tigervnc/issues/1096
+
+RUN cp /usr/lib/systemd/system/tigervncserver\@.service /etc/systemd/system/tigervncserver.service
+
+# `systemdctl` will throw: System has not been booted with systemd as init system (PID 1) will throw as bash is our entrypoint
+# `service` is still available
+
+# config order:
+# - /etc/tigervnc/vncserver-config-defaults
+# - $ENV{HOME}/.vnc/tigervnc.conf per user
+# - /etc/tigervnc/vncserver-config-mandatory
+
+# look up available desktop environments via:
+# $ ls /usr/share/xsessions/
+# lightdm-xsession.desktop  xfce.desktop
+# note that .desktop is removed in the session command
+# /etc/tigervnc/vncserver-config-mandatory overrides these settings
+RUN cat <<EOF > /root/.vnc/tigervnc.conf
+\$session="xfce";
+\$geometry="1920x1080";
+\$localhost="no";
+# AlwaysShared=no means a new connection will kick out the prior connection
+# with this set to "yes" Mac OS's screen share would periodically lose input after use of mouse in a guest
+# but that might have been connections binding as view-only
+\$AlwaysShared="no";
+EOF
+
+# todo: gen, xfer x509 certs
+# /etc/tigervnc/vncserver-config-defaults
+# $SecurityTypes a comma separated list of security types the TigerVNC
+#                server will offer. Available are None, VncAuth, Plain,
+#                TLSNone, TLSVnc, TLSPlain, X509None, X509Vnc, and X509Plain.
+#
+# $X509Cert and $X509Key contan the filenames for a certificate and its
+#           key that is used for the security types X509None, X509Vnc,
+#           and X509Plain.
+#
+# Default: $X509Cert is auto generated if absent and stored in
+#                    ~/.vnc/${HOSTFQDN}-SrvCert.pem
+# Default: $X509Key  is auto generated if absent and stored in
+#                    ~/.vnc/${HOSTFQDN}-SrvKey.pem
+
+# required for vncserver
+ENV USER=root
+
+FROM user_environment AS desktop
+RUN echo "UTC" > /etc/timezone
+RUN locale-gen en_US en_US.UTF-8
+
+# set the time in the host, independent of the OS to UTC
+RUN dpkg-reconfigure tzdata -f noninteractive
+
+# generate and keep our default encoding
+# to see available: locale -a
+RUN localedef -i en_US -f UTF-8 en_US.UTF-8
+RUN locale-gen --keep-existing
+
+ENV LANG=en_US.utf8
+ENV LANGUAGE=en_US.utf8
+ENV LC_ALL=en_US.utf8
+ENV LC_CTYPE=en_US.utf8
+
+# --- #
+RUN mkdir -p /srv/
+
+# start x11 vncserver
+RUN vncserver &
+WORKDIR /root/
+
+ENTRYPOINT ["/usr/bin/env"]
+CMD ["tmux"]
