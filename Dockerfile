@@ -115,7 +115,7 @@ RUN radare2/sys/install.sh
 
 
 # iaito
-RUN flatpak remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo \
+RUN flatpak remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 RUN flatpak install flathub org.radare.iaito -y
 
 # flatpak run org.radare.iaito to run
@@ -277,9 +277,10 @@ ENV LC_CTYPE=en_US.utf8
 
 # --- #
 RUN mkdir -p /srv/
+RUN updatedb
 
 # start x11 vncserver
-RUN vncserver &
+RUN tigervncserver &
 WORKDIR /root/
 
 ENTRYPOINT ["/usr/bin/env"]
