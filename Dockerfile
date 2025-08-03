@@ -26,6 +26,7 @@ RUN apt update && apt install -y \
     strace \
     tcpdump \
     tmux \
+    unzip \
     vim
 
 RUN apt install -y gcc autoconf gdb
@@ -83,16 +84,14 @@ print(go_file_name)
 EOF
 
 RUN chmod u+x /root/go_download_filename
-RUN curl -fsSLo /root/tool_downloads/$(/root/go_download_filename) "https://go.dev/dl/$(/root/go_download_filename)"
-RUN tar -xf /root/tool_downloads/$(/root/go_download_filename)
-RUN mv /root/tool_downloads/go /usr/local/go
+RUN curl -fsSLo "/root/tool_downloads/$(/root/go_download_filename)" "https://go.dev/dl/$(/root/go_download_filename)"
+RUN tar -xzf "/root/tool_downloads/$(/root/go_download_filename)" -C /usr/local/
 
 # rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+RUN curl -fsSo rust_init.sh https://sh.rustup.rs
+RUN sh rust_init.sh -y
 
 # java installed in sre_tools layer
-
-
 FROM languages AS data_fetchers
 
 ## web browser
@@ -124,11 +123,19 @@ RUN flatpak install flathub org.radare.iaito -y
 # ghidra
 # https://github.com/NationalSecurityAgency/ghidra
 # alternatively: https://github.com/blacktop/docker-ghidra
-#RUN apt install openjdk-17-jre-headless
+# openjdk-17-jre-headless is in the package manager, but Ghidra specifically lists Temurin
 RUN curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor > /etc/apt/trusted.gpg.d/adoptium.gpg
 RUN echo "deb https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" > /etc/apt/sources.list.d/adoptium.list
 RUN apt update
 RUN apt install -y temurin-17-jdk
+
+RUN curl -fsSLo /root/tool_downloads/ghidra_master.zip https://github.com/NationalSecurityAgency/ghidra/archive/refs/heads/master.zip
+RUN unzip -q /root/tool_downloads/ghidra_master.zip
+
+# there's not an apt repository or easy way to install an updated grade without another
+# one-off package manager so use Ghidra's fetch script
+RUN  /root/tool_downloads/ghidra-master/gradlew -I gradle/support/fetchDependencies.gradle
+RUN /root/tool_downloads/ghidra-master/gradlew buildGhidra
 
 # python 3 also required, with the OS version probably fine
 
