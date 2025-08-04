@@ -160,22 +160,20 @@ RUN echo "deb [signed-by=/usr/share/keyrings/metasploit.gpg] https://apt.metaspl
 
 FROM sec_research AS user_environment
 
-# we don't care these default values are in the layer, we just want to
-# conceal them from anything else running in a process that could get access to env vars
-ENV vnc_password_arg_full='lanparty!'
-ENV vnc_password_arg_view='linuxtx!'
-
 # to add user with no finger/identifying info, no password login allowed:
-# RUN adduser --disabled-password --gecos "" whatever
+RUN adduser --disabled-password --gecos "" user
 
 RUN <<EOF
 mkdir -p /root/.vnc/
-# .Xauthority gets populated on startup
+mkdir -p /home/user/.vnc/
+# .Xauthority gets populated on VNC startup
 touch /root/.Xauthority
+touch /home/user/.Xauthority
 EOF
 
 # users get their own ports for vnc sessions
 RUN echo ":1=root" >> /etc/tigervnc/vncserver.users
+RUN echo ":2=user" >> /etc/tigervnc/vncserver.users
 
 # set password either by vncpasswd or tigervncpasswd
 # md5sum `which vncpasswd`; md5sum `which tigervncpasswd`
@@ -185,14 +183,22 @@ RUN echo ":1=root" >> /etc/tigervnc/vncserver.users
 # set a default or take an arg to our VNC server to prevent an interactive prompt
 # to set a full access and a view only -- echo -e "whateverFullAccess\nwhateverViewOnly"
 # -e to interpret backslashes / special chars
+# we don't care these default values are in the layer, we just want to
+# conceal them from anything else running in a process that could get access to env vars
+ENV vnc_password_arg_full_root='lanparty!'
+ENV vnc_password_arg_view_root='linuxtx!'
+
+ENV vnc_password_arg_full_user='work work'
 
 # this construction is supposed to work, but is resulting in any password allowing access in read-only
-# RUN su root -c 'echo -e "$vnc_password_arg_view\n$vnc_password_arg_full" | vncpasswd -f > $HOME/.vnc/passwd'
-RUN su root -c 'echo -e "$vnc_password_arg_full" | vncpasswd -f > $HOME/.vnc/passwd'
+# RUN su root -c 'echo -e "$vnc_password_arg_view_root\n$vnc_password_arg_full_root" | vncpasswd -f > $HOME/.vnc/passwd'
+RUN su root -c 'echo -e "$vnc_password_arg_full_root" | vncpasswd -f > $HOME/.vnc/passwd'
 RUN chmod 0600 $HOME/.vnc/passwd
 
-ENV vnc_password_arg_full=''
-ENV vnc_password_arg_view=''
+RUN su root -c 'echo -e "vnc_password_arg_full_user" | vncpasswd -f > /home/user/.vnc/passwd'
+RUN chmod 0600 /home/user/.vnc/passwd
+
+ENV vnc_password_arg_full_user=''
 
 # write our desired configs for our users
 #
@@ -234,10 +240,14 @@ RUN cat <<EOF > /root/.vnc/tigervnc.conf
 \$session="xfce";
 \$geometry="1920x1080";
 \$localhost="no";
-# AlwaysShared=no means a new connection will kick out the prior connection
-# with this set to "yes" Mac OS's screen share would periodically lose input after use of mouse in a guest
-# but that might have been connections binding as view-only
-\$AlwaysShared="no";
+\$AlwaysShared="yes";
+EOF
+
+RUN cat <<EOF > /home/user/.vnc/tigervnc.conf
+\$session="xfce";
+\$geometry="1920x1080";
+\$localhost="no";
+\$AlwaysShared="yes";
 EOF
 
 # "TigerVNC includes libvnc.so, which can be seamlessly loaded during X initialization for enhanced performance. To utilize this feature, create the following file and then restart X:
