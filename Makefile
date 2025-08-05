@@ -49,3 +49,8 @@ rm_container:
 
 rm_image:
 	docker image rm workstation || true
+
+mac_os_command_vnc_brew:
+	echo "#!/usr/bin/env bash\nopen /opt/homebrew/Cellar/tiger-vnc/1.15.0/bin/vncviewer" > ~/Applications/VNC_Viewer.app
+	chmod u+x ~/Applications/VNC_Viewer.app
+	echo "drag VNC_Viewer.app from ~/Applications to the dock"

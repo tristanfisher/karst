@@ -24,6 +24,7 @@ RUN apt update && apt install -y \
     man \
     net-tools \
     strace \
+    sudo \
     tcpdump \
     tmux \
     unzip \
@@ -162,18 +163,36 @@ FROM sec_research AS user_environment
 
 # to add user with no finger/identifying info, no password login allowed:
 RUN adduser --disabled-password --gecos "" user
+RUN echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
 RUN <<EOF
 mkdir -p /root/.vnc/
 mkdir -p /home/user/.vnc/
+chown -R user:user /home/user/.vnc/
 # .Xauthority gets populated on VNC startup
 touch /root/.Xauthority
 touch /home/user/.Xauthority
+chown user:user /home/user/.Xauthority
 EOF
 
 # users get their own ports for vnc sessions
 RUN echo ":1=root" >> /etc/tigervnc/vncserver.users
 RUN echo ":2=user" >> /etc/tigervnc/vncserver.users
+
+
+# requires being a systemd service
+# /usr/lib/systemd/system/tigervncserver\@.service
+# https://github.com/TigerVNC/tigervnc/issues/1096
+
+# this doesn't work as systemd is required.  we don't use systemd because systemd tries
+# to pull more host OS devices, which is an absolute dearbreaker for a host that could be used for SRE + sec
+#RUN cp /usr/lib/systemd/system/tigervncserver\@.service /etc/systemd/system/tigervncserver.service
+#RUN systemctl enable tigervncserver@:1.service
+#RUN systemctl enable tigervncserver@:2.service
+
+# `systemdctl` will throw: System has not been booted with systemd as init system (PID 1) will throw as bash is our entrypoint
+# `service` is still available
+
 
 # set password either by vncpasswd or tigervncpasswd
 # md5sum `which vncpasswd`; md5sum `which tigervncpasswd`
@@ -195,7 +214,7 @@ ENV vnc_password_arg_full_user='work work'
 RUN su root -c 'echo -e "$vnc_password_arg_full_root" | vncpasswd -f > $HOME/.vnc/passwd'
 RUN chmod 0600 $HOME/.vnc/passwd
 
-RUN su root -c 'echo -e "vnc_password_arg_full_user" | vncpasswd -f > /home/user/.vnc/passwd'
+RUN su root -c 'echo -e "$vnc_password_arg_full_user" | vncpasswd -f > /home/user/.vnc/passwd'
 RUN chmod 0600 /home/user/.vnc/passwd
 
 ENV vnc_password_arg_full_user=''
@@ -216,15 +235,6 @@ ENV vnc_password_arg_full_user=''
 #   newfstatat(AT_FDCWD, "/etc/tigervnc/vncserver-config-mandatory", {st_mode=S_IFREG|0644, st_size=2189, ...}, 0) = 0
 #   newfstatat(AT_FDCWD, "/etc/tigervnc/vncserver-config-mandatory", {st_mode=S_IFREG|0644, st_size=2189, ...}, 0) = 0
 #   openat(AT_FDCWD, "/etc/tigervnc/vncserver-config-mandatory", O_RDONLY|O_CLOEXEC) = 3
-
-# requires being a systemd service
-# /usr/lib/systemd/system/tigervncserver\@.service
-# https://github.com/TigerVNC/tigervnc/issues/1096
-
-RUN cp /usr/lib/systemd/system/tigervncserver\@.service /etc/systemd/system/tigervncserver.service
-
-# `systemdctl` will throw: System has not been booted with systemd as init system (PID 1) will throw as bash is our entrypoint
-# `service` is still available
 
 # config order:
 # - /etc/tigervnc/vncserver-config-defaults
@@ -249,6 +259,7 @@ RUN cat <<EOF > /home/user/.vnc/tigervnc.conf
 \$localhost="no";
 \$AlwaysShared="yes";
 EOF
+RUN chown user:user /home/user/.vnc/tigervnc.conf
 
 # "TigerVNC includes libvnc.so, which can be seamlessly loaded during X initialization for enhanced performance. To utilize this feature, create the following file and then restart X:
 # https://wiki.archlinux.org/title/TigerVNC
@@ -310,7 +321,13 @@ RUN updatedb
 # d105957af8cd8ff50e760340b6c890dd  /usr/bin/vncserver
 
 WORKDIR /root/
-RUN tigervncserver &
+RUN tigervncserver :1 &
+
+# chown user dir, just in case
+RUN chown -R user:user /home/user/
+
+USER user
+RUN tigervncserver :2 &
 
 # todo: set xfce launchers https://forum.xfce.org/viewtopic.php?id=11713
 
