@@ -107,6 +107,8 @@ RUN apt install -y brave-browser
 FROM data_fetchers AS sre_tools
 
 RUN apt install -y hexedit
+# dbus required for flathub
+RUN service dbus start
 
 # radare2
 # wget is used by the radare2 install script
@@ -316,6 +318,7 @@ ENV LC_CTYPE=en_US.utf8
 # --- #
 RUN mkdir -p /srv/
 RUN updatedb
+
 
 # start vncerver with either tigervncserver or vncserver
 # $ md5sum $(which tigervncserver)
