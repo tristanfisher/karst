@@ -328,16 +328,17 @@ WORKDIR /root/
 # chown user dir, just in case
 RUN chown -R user:user /home/user/
 
+RUN /usr/local/go/bin/go install github.com/tristanfisher/noexit@latest
+
 RUN cat <<EOF > /root/start_vnc
 #!/usr/bin/env bash
 tigervncserver :1
 echo "started root vnc server"
 su - user -c "tigervncserver :2"
 echo "started user vnc server"
-tmux
+/root/go/bin/noexit
 EOF
 
 RUN chmod u+x /root/start_vnc
-
 
 CMD ["sh", "-c", "/root/start_vnc"]
