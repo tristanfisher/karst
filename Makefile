@@ -26,6 +26,11 @@ run:
 	mkdir -p ${LOCAL_LIB_DIR}
 	docker run --interactive --tty ${MOUNT_COMMAND} ${PORT_MAP} --name ${IMAGE_NAME} workstation
 
+stop:
+	docker stop workstation || true
+
+fresh: stop build run
+
 bg_run:
 	docker run ${MOUNT_COMMAND} ${PORT_MAP} --name ${IMAGE_NAME} workstation
 

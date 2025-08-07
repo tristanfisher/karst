@@ -165,6 +165,9 @@ FROM sec_research AS user_environment
 RUN adduser --disabled-password --gecos "" user
 RUN echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
+RUN echo "export PATH=$PATH:/usr/local/go/bin" >> /root/.bashrc
+RUN echo "export PATH=$PATH:/usr/local/go/bin" >> /home/user/.bashrc
+
 RUN <<EOF
 mkdir -p /root/.vnc/
 mkdir -p /home/user/.vnc/
@@ -321,15 +324,20 @@ RUN updatedb
 # d105957af8cd8ff50e760340b6c890dd  /usr/bin/vncserver
 
 WORKDIR /root/
-RUN tigervncserver :1 &
 
 # chown user dir, just in case
 RUN chown -R user:user /home/user/
 
-USER user
-RUN tigervncserver :2 &
+RUN cat <<EOF > /root/start_vnc
+#!/usr/bin/env bash
+tigervncserver :1
+echo "started root vnc server"
+su - user -c "tigervncserver :2"
+echo "started user vnc server"
+tmux
+EOF
 
-# todo: set xfce launchers https://forum.xfce.org/viewtopic.php?id=11713
+RUN chmod u+x /root/start_vnc
 
-ENTRYPOINT ["/usr/bin/env"]
-CMD ["tmux"]
+
+CMD ["sh", "-c", "/root/start_vnc"]
